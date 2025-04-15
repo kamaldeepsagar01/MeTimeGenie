@@ -1,2 +1,1 @@
-# MeTimeGenie
-This is a branch for MeTimeGeniew
+# Activity Suggester App

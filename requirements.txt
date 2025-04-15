@@ -1,0 +1,8 @@
+streamlit
+google-generativeai
+openrouteservice
+pandas
+requests
+googlemaps
+python-dotenv
+openai
