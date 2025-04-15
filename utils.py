@@ -156,9 +156,9 @@ def get_synthetic_user():
     # Define the user's base information
     user_data = {
         "location": {
-            "city": "Bangalore",
-            "lat": 12.9716,
-            "lon": 77.5946
+            "city": "New York",
+            "lat": 40.7128° N,
+            "lon": 74.0060° W
         },
         "weather": "Rainy",
         "current_time": "Saturday 8 AM",
