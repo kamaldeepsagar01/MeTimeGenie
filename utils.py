@@ -157,8 +157,8 @@ def get_synthetic_user():
     user_data = {
         "location": {
             "city": "New York",
-            "lat": 40.7128° N,
-            "lon": 74.0060° W
+            "lat": 40.7128,
+            "lon": 74.0060
         },
         "weather": "Rainy",
         "current_time": "Saturday 8 AM",
