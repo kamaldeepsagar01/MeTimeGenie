@@ -923,13 +923,16 @@ def get_user_preferences_db():
     if "user_preferences" not in st.session_state:
         st.session_state.user_preferences = {
             "category_preferences": {
-                "food": 0.8,
+                "food": 0.4,
                 "travel": 0.5,
                 "shopping": 0.5,
                 "gaming": 0.5,
                 "news": 0.5,
                 "fitness": 0.7,
-                "cooking": 0.9
+                "sports": 0.8,
+                "cooking": 0.5,
+                "events": 0.9,
+                "theatre": 0.7
             },
             "liked_places": [],
             "disliked_places": []
