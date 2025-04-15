@@ -16,6 +16,7 @@ import logging
 import re
 from PIL import UnidentifiedImageError
 import openai
+from typing import List, Dict, Optional
 
 # Make sure to set OPENAI_API_KEY in your environment or replace here.
 #openai.api_key = os.getenv("OPENAI_API_KEY", "your-default-api-key")
