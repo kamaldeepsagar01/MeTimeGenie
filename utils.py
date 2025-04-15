@@ -28,9 +28,9 @@ from bs4 import BeautifulSoup
 
 # config.py
 API_KEYS = {
-    "ticketmaster": "YOUR_TICKETMASTER_API_KEY",
-    "eventbrite": "YOUR_EVENTBRITE_API_KEY",
-    "predicthq": "YOUR_PREDICTHQ_API_KEY",
+    "ticketmaster": TICKETMASTER_API_KEY,
+    "eventbrite": EVENTBRITE_API_KEY,
+    "predicthq": PREDICTHQ_API_KEY,
 }
 
 # Define the order of APIs to try (modify as needed)
@@ -241,7 +241,7 @@ def extract_keywords_from_prompt(prompt):
     """
     try:
         # If we have OpenAI access, use it for best results
-        if openai.api_key and openai.api_key != "Test":
+        if OPENAI_API_KEY.api_key and OPENAI_API_KEY != "Test":
             try:
                 response = openai.ChatCompletion.create(
                     model="gpt-3.5-turbo",
