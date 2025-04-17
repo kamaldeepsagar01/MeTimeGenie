@@ -27,10 +27,16 @@ from typing import List, Dict, Optional
 from bs4 import BeautifulSoup
 
 # config.py
+# API_KEYS = {
+#     "ticketmaster": st.secrets["TICKETMASTER_API_KEY"],
+#     "eventbrite": st.secrets["EVENTBRITE_API_KEY"],
+#     "predicthq": st.secrets["PREDICTHQ_API_KEY"]
+# }
+
 API_KEYS = {
-    "ticketmaster": st.secrets["TICKETMASTER_API_KEY"],
-    "eventbrite": st.secrets["EVENTBRITE_API_KEY"],
-    "predicthq": st.secrets["PREDICTHQ_API_KEY"]
+    "ticketmaster": TICKETMASTER_API_KEY,
+    "eventbrite": EVENTBRITE_API_KEY,
+    "predicthq": PREDICTHQ_API_KEY
 }
 
 OPENAI_API_KEY = st.secrets["OPENAI_API_KEY"]

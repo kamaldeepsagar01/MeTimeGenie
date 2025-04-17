@@ -37,6 +37,14 @@ from utils import (
     fetch_and_store_events,
     has_more_events,
     get_next_event_for_display,
+    format_event,
+    fetch_ticketmaster_events,
+    fetch_eventbrite_events,
+    fetch_predicthq_events,
+    scrape_google_events,
+    # Import Calendar functions
+    get_upcoming_weekend,
+    get_weekend_free_slots,
     AppError, APIError, LLMError, ImageError
 )
 
@@ -73,6 +81,9 @@ if "initialized" not in st.session_state:
         GOOGLE_MAPS_API_KEY = st.secrets["GOOGLE_MAPS_API_KEY"]
         GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
         ORS_API_KEY = st.secrets["ORS_API_KEY"]
+        TICKETMASTER_API_KEY = st.secrets["TICKETMASTER_API_KEY"]
+        EVENTBRITE_API_KEY = st.secrets["EVENTBRITE_API_KEY"]
+        PREDICTHQ_API_KEY = st.secrets["PREDICTHQ_API_KEY"]
 
         # Configure Gemini model
         os.environ['GEMINI_API_KEY'] = GEMINI_API_KEY
@@ -271,16 +282,21 @@ if "recommendation_shown" not in st.session_state or not st.session_state.recomm
                 try:
                     # Fetch events based on user data
                     city = user.get("location", {}).get("city", "")
-                    country_code = user.get("location", {}).get("country_code", "")
+                    country_code = user.get("location", {}).get("country_code", "US")  # Default to US
 
                     logging.info(f"Fetching events for interest: {top_interest}, city: {city}, country: {country_code}")
 
-                    # Calculate date range (today + 30 days)
+                    # Get upcoming weekend dates
                     today = datetime.now()
-                    start_date = today.strftime("%Y-%m-%d")
-                    end_date = (today.replace(day=today.day + 30)).strftime("%Y-%m-%d")
+                    saturday, sunday = get_upcoming_weekend(today)
 
-                    # Fetch events
+                    # Format dates for API
+                    start_date = saturday.strftime("%Y-%m-%d")
+                    end_date = sunday.strftime("%Y-%m-%d")
+
+                    logging.info(f"Fetching events for weekend: {start_date} to {end_date}")
+
+                    # Fetch events specifically for the weekend
                     success = fetch_and_store_events(
                         interest=top_interest,
                         city=city,
@@ -300,6 +316,13 @@ if "recommendation_shown" not in st.session_state or not st.session_state.recomm
                             event_description += f"📍 **Location:** {event['location']}\n"
                             if event.get('venue'):
                                 event_description += f"🏢 **Venue:** {event['venue']}\n"
+
+                            # Add day of week if possible
+                            try:
+                                event_date = datetime.strptime(event['date'].split(' ')[0], "%Y-%m-%d")
+                                event_description += f"📆 **Day:** {event_date.strftime('%A')}\n"
+                            except:
+                                pass
 
                             # Store in session state
                             st.session_state.current_event = event
@@ -341,13 +364,13 @@ if "recommendation_shown" not in st.session_state or not st.session_state.recomm
 
                         else:
                             # No events found, fallback to outdoor
-                            logging.warning("No events found, falling back to outdoor flow")
+                            logging.warning("No events found for weekend, falling back to outdoor flow")
                             st.session_state.activity_type = "outdoor"
                             # Force rerun to process outdoor flow
                             st.rerun()
                     else:
                         # No events found, fallback to outdoor
-                        logging.warning("No events found, falling back to outdoor flow")
+                        logging.warning("No events found for weekend, falling back to outdoor flow")
                         st.session_state.activity_type = "outdoor"
                         # Force rerun to process outdoor flow
                         st.rerun()
@@ -496,6 +519,13 @@ if "recommendation_data" in st.session_state:
                     if next_event.get('venue'):
                         event_description += f"🏢 **Venue:** {next_event['venue']}\n"
 
+                    # Add day of week if possible
+                    try:
+                        event_date = datetime.strptime(next_event['date'].split(' ')[0], "%Y-%m-%d")
+                        event_description += f"📆 **Day:** {event_date.strftime('%A')}\n"
+                    except:
+                        pass
+
                     # Try to get image for the event
                     image_url = None
                     try:
@@ -507,6 +537,14 @@ if "recommendation_data" in st.session_state:
                                 if img_url:
                                     image_url = img_url
                                     break
+
+                        # If no image found, try with venue
+                        if not image_url and next_event.get('venue'):
+                            image_url = fetch_image_for_keyword(next_event['venue'], st.session_state.GOOGLE_MAPS_API_KEY)
+
+                        # Last resort - try with interest type
+                        if not image_url:
+                            image_url = fetch_unsplash_image(st.session_state.top_interest)
                     except Exception:
                         pass
 
@@ -590,8 +628,17 @@ if "recommendation_data" in st.session_state:
         )
         st.markdown(f"### 📖 More details:\n\n{detailed}")
 
-        # Display maps link if available
-        if maps_html:
+        # Display ticket link if it's an event and has a URL
+        if data.get("type") == "event" and data.get("event_data", {}).get("url"):
+            event_url = data["event_data"]["url"]
+            ticket_html = f"""
+            <div style="margin-top: 20px; padding: 10px; background-color: #f0f0f0; border-radius: 5px;">
+                <strong>🎫 Get Tickets:</strong> <a href="{event_url}" target="_blank">Click here to view tickets/details</a>
+            </div>
+            """
+            st.markdown(ticket_html, unsafe_allow_html=True)
+        # Display maps link if available for places
+        elif maps_html:
             st.markdown(maps_html, unsafe_allow_html=True)
 
 # Display errors if any occurred
