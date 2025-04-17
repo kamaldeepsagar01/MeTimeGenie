@@ -156,7 +156,7 @@ def init_clients(openroute_api_key, google_maps_api_key):
     return ors_client, gmaps_client
 
 # Generate synthetic user context
-def get_synthetic_user():
+def get_synthetic_users_by_free_slot():
     # This is a placeholder function that returns synthetic user data
     # In a real app, you would get this data from the user's actual context
     """
@@ -169,8 +169,63 @@ def get_synthetic_user():
     # Get weekend dates
     saturday, sunday = get_upcoming_weekend(now)
 
+    calendar = [
+        # Saturday events
+        {
+            "summary": "Brunch with friends",
+            "start": datetime.combine(saturday, time(11, 0)).astimezone(pytz.timezone("America/New_York")),
+            "end": datetime.combine(saturday, time(13, 0)).astimezone(pytz.timezone("America/New_York")),
+            "all_day": False
+        },
+        {
+            "summary": "Gym session",
+            "start": datetime.combine(saturday, time(16, 0)).astimezone(pytz.timezone("America/New_York")),
+            "end": datetime.combine(saturday, time(17, 30)).astimezone(pytz.timezone("America/New_York")),
+            "all_day": False
+        },
+        # Sunday events
+        {
+            "summary": "Family dinner",
+            "start": datetime.combine(sunday, time(18, 0)).astimezone(pytz.timezone("America/New_York")),
+            "end": datetime.combine(sunday, time(20, 0)).astimezone(pytz.timezone("America/New_York")),
+            "all_day": False
+        }
+    ]
+
+    # Calculate free time for the weekend
+    weekend_slots = get_weekend_free_slots(calendar, now)
+
+    synthetic_users = []
+
+    for day_key in ["saturday", "sunday"]:
+            for slot in weekend_slots[day_key]["free_slots"]:
+                free_hours = round(slot["duration"], 2)  # Or keep as float
+
+                user_data = {
+                    "location": {
+                        "city": "New York",
+                        "lat": 40.7128,
+                        "lon": 74.0060
+                    },
+                    "weather": "Rainy",
+                    "current_time": slot["start"],
+                    "free_hours": free_hours,
+                    "timezone": "America/New_York",
+                    "interests": {
+                        "travel": 0.91,
+                        "food": 0.18,
+                        "news": 0.15,
+                        "shopping": 0.13,
+                        "gaming": 0.24
+                    },
+                    "calendar": calendar,
+                    "weekend_free_slots": weekend_slots
+                }
+
+                synthetic_users.append(user_data)
+
     # Define the user's base information
-    user_data = {
+"""     user_data = {
         "location": {
             "city": "New York",
             "lat": 40.7128,
@@ -192,29 +247,7 @@ def get_synthetic_user():
             "gaming": 0.24
         },
         "timezone": "America/New_York",
-        "calendar": [
-            # Saturday events
-            {
-                "summary": "Brunch with friends",
-                "start": datetime.combine(saturday, time(11, 0)).astimezone(pytz.timezone("America/New_York")),
-                "end": datetime.combine(saturday, time(13, 0)).astimezone(pytz.timezone("America/New_York")),
-                "all_day": False
-            },
-            {
-                "summary": "Gym session",
-                "start": datetime.combine(saturday, time(16, 0)).astimezone(pytz.timezone("America/New_York")),
-                "end": datetime.combine(saturday, time(17, 30)).astimezone(pytz.timezone("America/New_York")),
-                "all_day": False
-            },
-            # Sunday events
-            {
-                "summary": "Family dinner",
-                "start": datetime.combine(sunday, time(18, 0)).astimezone(pytz.timezone("America/New_York")),
-                "end": datetime.combine(sunday, time(20, 0)).astimezone(pytz.timezone("America/New_York")),
-                "all_day": False
-            }
-        ]
-    }
+    } """
 
     # Calculate free hours based on current time and calendar
 #     user_data["free_hours"] = calculate_free_time(
@@ -223,9 +256,11 @@ def get_synthetic_user():
 #     )
 
     # Calculate free time for the weekend
-    user_data["weekend_free_slots"] = get_weekend_free_slots(user_data["calendar"], now)
+    #user_data["weekend_free_slots"] = get_weekend_free_slots(user_data["calendar"], now)
 
-    return user_data
+    #return user_data
+
+    return synthetic_users
 
 def extract_main_keywords(text):
     """

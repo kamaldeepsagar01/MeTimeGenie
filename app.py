@@ -7,7 +7,8 @@ import traceback
 
 # Import from utils.py
 from utils import (
-    get_synthetic_user,
+    #get_synthetic_user,
+    get_synthetic_users_by_free_slot,
     top_activity_interest_llm,
     build_llm_decision_prompt,
     build_llm_prompt_indoor,
@@ -113,12 +114,40 @@ model = st.session_state.model
 # App Header
 st.title("What should I do now?")
 
+# ========== Main User Loop ============
+st.header("🧠 Personalized Weekend Suggestions")
+
+# Loop through free slots for the weekend
+users = get_synthetic_users_by_free_slot()
+
+if not users:
+    st.warning("No available free slots for this weekend.")
+else:
+    for idx, user in enumerate(users):
+        st.subheader(f"🗓️ Slot #{idx+1}")
+        st.write(f"⏰ Free slot at **{user['current_time']}** for **{user['free_hours']} hours**")
+
+        try:
+            top_interest = top_activity_interest_llm(user)
+            st.write(f"🎯 Top interest: `{top_interest}`")
+
+            # You can now call other logic like: build_llm_prompt_indoor(), fetch suggestions, etc.
+
+        except Exception as e:
+            st.error(f"Failed to process this slot: {e}")
+
+        st.markdown("---")
+
+        # Optional: limit to first few slots
+        if idx >= 2:
+            break
+
 # Generate user context if not already in session
-if "user" not in st.session_state:
+"""if "user" not in st.session_state:
     user = get_synthetic_user()
     st.session_state.user = user
 else:
-    user = st.session_state.user
+    user = st.session_state.user"""
 
 # Process recommendation when needed
 if "recommendation_shown" not in st.session_state or not st.session_state.recommendation_shown:
