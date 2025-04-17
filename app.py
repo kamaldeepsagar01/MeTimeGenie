@@ -725,7 +725,7 @@ with st.sidebar.expander("🔄 Reset Options"):
             # Reset everything including preferences
             for key in list(st.session_state.keys()):
                 if key != "initialized" and key not in ["GOOGLE_MAPS_API_KEY", "model", "ors_client", "gmaps_client"]:
-                    del st.session_state
+                    del st.session_state[key]
             st.rerun()
 
 # Footer
