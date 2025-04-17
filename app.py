@@ -5,9 +5,6 @@ import google.generativeai as genai
 import logging
 import traceback
 
-
-#from utils import get_synthetic_user
-
 # Import from utils.py
 from utils import (
     get_synthetic_users_by_free_slot,
@@ -115,7 +112,6 @@ if "initialized" not in st.session_state:
         st.stop()
 
 # Get model from session state
-#model = st.session_state.model
 model = st.session_state.get("model")
 if not model:
     st.error("Gemini model not loaded yet.")
@@ -151,13 +147,6 @@ else:
         # Optional: limit to first few slots
         if idx >= 2:
             break
-
-# Generate user context if not already in session
-"""if "user" not in st.session_state:
-    user = get_synthetic_user()
-    st.session_state.user = user
-else:
-    user = st.session_state.user"""
 
 # Process recommendation when needed
 if "recommendation_shown" not in st.session_state or not st.session_state.recommendation_shown:
@@ -620,7 +609,7 @@ if "recommendation_data" in st.session_state:
 
     with col2:
         if st.button("👎 Show me something else"):
-        # Update user preferences with dislike
+            # Update user preferences with dislike
             item_data = {
                 "name": data.get("name", "Unknown"),
                 "type": data.get("activity_type", "Unknown")
@@ -736,7 +725,7 @@ with st.sidebar.expander("🔄 Reset Options"):
             # Reset everything including preferences
             for key in list(st.session_state.keys()):
                 if key != "initialized" and key not in ["GOOGLE_MAPS_API_KEY", "model", "ors_client", "gmaps_client"]:
-                    del st.session_state[key]
+                    del st.session_state
             st.rerun()
 
 # Footer
