@@ -109,7 +109,11 @@ if "initialized" not in st.session_state:
         st.stop()
 
 # Get model from session state
-model = st.session_state.model
+#model = st.session_state.model
+model = st.session_state.get("model")
+if not model:
+    st.error("Gemini model not loaded yet.")
+    st.stop()
 
 # App Header
 st.title("What should I do now?")
