@@ -5,9 +5,11 @@ import google.generativeai as genai
 import logging
 import traceback
 
+
+#from utils import get_synthetic_user
+
 # Import from utils.py
 from utils import (
-    #get_synthetic_user,
     get_synthetic_users_by_free_slot,
     top_activity_interest_llm,
     build_llm_decision_prompt,
