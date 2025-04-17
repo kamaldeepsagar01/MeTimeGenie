@@ -40,6 +40,8 @@ API_PRIORITY = ["ticketmaster", "eventbrite", "predicthq"]
 
 RESULTS_PER_PAGE = 10  # Number of events to fetch and store
 
+NOW = datetime.now()
+
 # Mapping of Interest (Event Type) to Ticketmaster segmentId
 EVENT_TYPE_TO_SEGMENT = {
     "Music": "KZFzniwnSyZfZ7v7nJ",      # Concerts, Festivals
@@ -161,27 +163,54 @@ def get_synthetic_user():
             "lon": 74.0060
         },
         "weather": "Rainy",
-        "current_time": "Saturday 8 AM",
+        #"current_time": "Saturday 8 AM",
+        "current_time" : now,
         #"free_hours": 4,
-        "calendar": [
-            {"event": "Lunch with friend", "start": "1 PM", "end": "2 PM"},
-            {"event": "Office Meeting", "start": "6 PM", "end": "7 PM"}
-        ],
+#         calendar": [
+#             {"event": "Lunch with friend", "start": "1 PM", "end": "2 PM"},
+#             {"event": "Office Meeting", "start": "6 PM", "end": "7 PM"}
+#         ],
         "interests": {
             "travel": 0.91,
             "food": 0.18,
             "news": 0.15,
             "shopping": 0.13,
             "gaming": 0.24
-        }
+        },
+        "timezone": "America/New_York",
+        "calendar": [
+            # Saturday events
+            {
+                "summary": "Brunch with friends",
+                "start": datetime.combine(saturday, time(11, 0)).astimezone(pytz.timezone("America/New_York")),
+                "end": datetime.combine(saturday, time(13, 0)).astimezone(pytz.timezone("America/New_York")),
+                "all_day": False
+            },
+            {
+                "summary": "Gym session",
+                "start": datetime.combine(saturday, time(16, 0)).astimezone(pytz.timezone("America/New_York")),
+                "end": datetime.combine(saturday, time(17, 30)).astimezone(pytz.timezone("America/New_York")),
+                "all_day": False
+            },
+            # Sunday events
+            {
+                "summary": "Family dinner",
+                "start": datetime.combine(sunday, time(18, 0)).astimezone(pytz.timezone("America/New_York")),
+                "end": datetime.combine(sunday, time(20, 0)).astimezone(pytz.timezone("America/New_York")),
+                "all_day": False
+            }
+        ]
     }
-    
+
     # Calculate free hours based on current time and calendar
-    user_data["free_hours"] = calculate_free_time(
-        user_data["current_time"], 
-        user_data["calendar"]
-    )
-    
+#     user_data["free_hours"] = calculate_free_time(
+#         user_data["current_time"],
+#         user_data["calendar"]
+#     )
+
+    # Calculate free time for the weekend
+    user_data["weekend_free_slots"] = get_weekend_free_slots(user_data["calendar"], now)
+
     return user_data
 
 def extract_main_keywords(text):
@@ -1557,6 +1586,79 @@ def get_next_event_for_display() -> Optional[Dict]:
 def has_more_events() -> bool:
     """Check if more events are available"""
     return event_storage.has_more_events()
+
+def get_upcoming_weekend(now=None):
+    if now is None:
+        now = datetime.now()
+
+    # Find how many days to add to get to Saturday (weekday 5)
+    days_until_saturday = (5 - now.weekday()) % 7
+    saturday = now + timedelta(days=days_until_saturday)
+    sunday = saturday + timedelta(days=1)
+
+    # Return just the dates (without time)
+    return saturday.date(), sunday.date()
+
+def get_weekend_free_slots(calendar_events, current_time):
+    """Calculate free time slots for the upcoming weekend."""
+    tz = pytz.timezone("America/New_York")
+    now_local = current_time.astimezone(tz)
+    saturday, sunday = get_upcoming_weekend(now_local)
+
+    # Initialize day structure
+    weekend_days = {
+        "saturday": {
+            "date": saturday,
+            "busy_slots": [],
+            "free_slots": []
+        },
+        "sunday": {
+            "date": sunday,
+            "busy_slots": [],
+            "free_slots": []
+        }
+    }
+
+    # Process calendar events
+    for event in calendar_events:
+        event_date = event["start"].date()
+        if event_date in [saturday, sunday]:
+            day_key = "saturday" if event_date == saturday else "sunday"
+            weekend_days[day_key]["busy_slots"].append({
+                "start": event["start"],
+                "end": event["end"],
+                "summary": event.get("summary", "")
+            })
+
+    # Calculate free slots for each day
+    for day in ["saturday", "sunday"]:
+        date = weekend_days[day]["date"]
+        busy_slots = sorted(weekend_days[day]["busy_slots"], key=lambda x: x["start"])
+
+        # Day boundaries (9 AM to 10 PM)
+        day_start = datetime.combine(date, time(9, 0)).astimezone(tz)
+        day_end = datetime.combine(date, time(22, 0)).astimezone(tz)
+
+        # Find gaps between events
+        prev_end = day_start
+        for slot in busy_slots:
+            if slot["start"] > prev_end:
+                weekend_days[day]["free_slots"].append({
+                    "start": prev_end,
+                    "end": slot["start"],
+                    "duration": (slot["start"] - prev_end).total_seconds() / 3600
+                })
+            prev_end = max(prev_end, slot["end"])
+
+        # Add remaining time after last event
+        if prev_end < day_end:
+            weekend_days[day]["free_slots"].append({
+                "start": prev_end,
+                "end": day_end,
+                "duration": (day_end - prev_end).total_seconds() / 3600
+            })
+
+    return weekend_days
 
 # Enhanced version of choose_place with better error handling
 @safe_api_call
