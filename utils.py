@@ -736,6 +736,8 @@ def get_adjusted_interests(user):
 
 def top_activity_interest_llm(user):
     model = st.session_state.model
+    if not model:
+        raise RuntimeError("Model not initialized in session state")
     
     # Get adjusted interests based on feedback
     adjusted_interests = get_adjusted_interests(user)
