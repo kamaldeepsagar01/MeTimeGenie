@@ -48,7 +48,7 @@ API_PRIORITY = ["ticketmaster", "eventbrite", "predicthq"]
 
 RESULTS_PER_PAGE = 10  # Number of events to fetch and store
 
-now = datetime.datetime.now()
+now = datetime.now()
 
 # Mapping of Interest (Event Type) to Ticketmaster segmentId
 EVENT_TYPE_TO_SEGMENT = {
@@ -165,7 +165,7 @@ def get_synthetic_user():
     """
 
     tz = pytz.timezone("America/New_York")
-    now = datetime.datetime.now()
+    now = datetime.now()
     # Get weekend dates
     saturday, sunday = get_upcoming_weekend(now)
 
