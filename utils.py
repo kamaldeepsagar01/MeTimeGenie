@@ -17,6 +17,8 @@ import re
 from PIL import UnidentifiedImageError
 import openai
 from typing import List, Dict, Optional
+from datetime import datetime, time, timedelta
+import pytz
 
 # Make sure to set OPENAI_API_KEY in your environment or replace here.
 #openai.api_key = os.getenv("OPENAI_API_KEY", "your-default-api-key")
@@ -161,6 +163,12 @@ def get_synthetic_user():
     Return synthetic user data with automatically calculated free hours
     based on calendar and current time.
     """
+
+    tz = pytz.timezone("America/New_York")
+    now = datetime.datetime.now()
+    # Get weekend dates
+    saturday, sunday = get_upcoming_weekend(now)
+
     # Define the user's base information
     user_data = {
         "location": {
