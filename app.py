@@ -23,12 +23,13 @@ from utils import (
     get_user_preferences_db,
     extract_main_keywords,
     fetch_image_for_keyword,
-    extract_keywords_from_prompt,  # New import
-    extract_food_keywords,  # New import
-    extract_nouns,  # New import
-    fetch_image_for_keyword,
-    fetch_unsplash_image,  # New import
-    fetch_google_images, extract_core_keyword, simplify_keyword,
+    extract_keywords_from_prompt,      # New import
+    extract_food_keywords,             # New import
+    extract_nouns,                     # New import
+    fetch_unsplash_image,             # New import
+    fetch_google_images,
+    extract_core_keyword,
+    simplify_keyword,
     # New imports for suggestion history
     get_suggestion_history,
     is_duplicate_suggestion,
@@ -48,7 +49,10 @@ from utils import (
     # Import Calendar functions
     get_upcoming_weekend,
     get_weekend_free_slots,
-    AppError, APIError, LLMError, ImageError
+    AppError,
+    APIError,
+    LLMError,
+    ImageError
 )
 
 st.set_page_config(page_title="Activity Suggester", layout="centered")
