@@ -46,7 +46,7 @@ API_PRIORITY = ["ticketmaster", "eventbrite", "predicthq"]
 
 RESULTS_PER_PAGE = 10  # Number of events to fetch and store
 
-NOW = datetime.datetime.now()
+now = datetime.datetime.now()
 
 # Mapping of Interest (Event Type) to Ticketmaster segmentId
 EVENT_TYPE_TO_SEGMENT = {
