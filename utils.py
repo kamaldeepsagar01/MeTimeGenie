@@ -1,5 +1,8 @@
 # This is the complete utils.py file
 
+import os
+import uuid
+from typing import Dict, Any, Optional
 import datetime
 import random
 import pandas as pd
@@ -15,42 +18,31 @@ import traceback
 import logging
 import re
 from PIL import UnidentifiedImageError
+from astrapy import DataAPIClient
 import openai
-from typing import List, Dict, Optional
+from bs4 import BeautifulSoup
 from datetime import datetime, time, timedelta
 import pytz
+from typing import List, Dict, Optional
+import webbrowser
+from urllib.parse import quote, urlencode
 
 # Make sure to set OPENAI_API_KEY in your environment or replace here.
 #openai.api_key = os.getenv("OPENAI_API_KEY", "your-default-api-key")
 
-#UNSPLASH_ACCESS_KEY = "rVvxvkYuJREpI8wMn9GvJUGhj5bZVlVFBkKMx1QquQA"
 
-# scraper.py
-from bs4 import BeautifulSoup
+UNSPLASH_ACCESS_KEY = "rVvxvkYuJREpI8wMn9GvJUGhj5bZVlVFBkKMx1QquQA"
 
-# config.py
 API_KEYS = {
     "ticketmaster": st.secrets["TICKETMASTER_API_KEY"],
     "eventbrite": st.secrets["EVENTBRITE_API_KEY"],
     "predicthq": st.secrets["PREDICTHQ_API_KEY"]
 }
 
-# API_KEYS = {
-#     "ticketmaster": TICKETMASTER_API_KEY,
-#     "eventbrite": EVENTBRITE_API_KEY,
-#     "predicthq": PREDICTHQ_API_KEY
-# }
-
-OPENAI_API_KEY = st.secrets["OPENAI_API_KEY"]
-
-# Define the order of APIs to try (modify as needed)
 API_PRIORITY = ["ticketmaster", "eventbrite", "predicthq"]
-
 RESULTS_PER_PAGE = 10  # Number of events to fetch and store
 
-now = datetime.now()
-
-# Mapping of Interest (Event Type) to Ticketmaster segmentId
+# Mapping dictionaries
 EVENT_TYPE_TO_SEGMENT = {
     "Music": "KZFzniwnSyZfZ7v7nJ",      # Concerts, Festivals
     "Sports": "KZFzniwnSyZfZ7v7nE",     # Cricket, Football, WWE
@@ -110,7 +102,6 @@ class ImageError(AppError):
     def __init__(self, message, original_exception=None):
         super().__init__(message, "image_error", original_exception)
 
-# ====================== Data Storage ======================
 class EventStorage:
     """Stores and manages events for paginated display"""
     def __init__(self):
@@ -133,8 +124,353 @@ class EventStorage:
         """Check if more events are available"""
         return self.current_index < len(self.events)
 
+
 # Initialize storage
 event_storage = EventStorage()
+
+
+def get_upcoming_weekend(now=None):
+    if now is None:
+        now = datetime.now()
+
+    # Find how many days to add to get to Saturday (weekday 5)
+    days_until_saturday = (5 - now.weekday()) % 7
+    saturday = now + timedelta(days=days_until_saturday)
+    sunday = saturday + timedelta(days=1)
+
+    # Return just the dates (without time)
+    return saturday.date(), sunday.date()
+
+
+
+
+def fetch_ticketmaster_events(api_key, interest=None, city=None, country_code=None, start_date=None, end_date=None, size=10):
+    """
+    Fetches events from Ticketmaster API based on interest (event type).
+
+    Args:
+        api_key (str): Ticketmaster API key.
+        interest (str, optional): Event type (e.g., "Music", "Sports"). Defaults to None.
+        city (str, optional): Filter by city (e.g., "Mumbai"). Defaults to None.
+        country_code (str, optional): 2-letter country code (e.g., "IN"). Defaults to None.
+        start_date (str, optional): Start date in "YYYY-MM-DD" format. Defaults to None.
+        end_date (str, optional): End date in "YYYY-MM-DD" format. Defaults to None.
+        size (int, optional): Number of results (max 200). Defaults to 10.
+
+    Returns:
+        dict: JSON response from Ticketmaster API.
+    """
+
+    params = {"apikey": api_key, "size": size}
+    if interest in EVENT_TYPE_TO_SEGMENT:
+        params["segmentId"] = EVENT_TYPE_TO_SEGMENT[interest]
+
+    # Base API URL
+    url = "https://app.ticketmaster.com/discovery/v2/events.json"
+
+
+    # Add segmentId if interest is valid
+    if interest and interest in EVENT_TYPE_TO_SEGMENT:
+        params["segmentId"] = EVENT_TYPE_TO_SEGMENT[interest]
+
+    # Add location filters
+    if city:
+        params["city"] = city
+    if country_code:
+        params["countryCode"] = country_code
+
+    # Add date filters (ISO 8601 format)
+    if start_date:
+        params["startDateTime"] = f"{start_date}T00:00:00Z"
+    if end_date:
+        params["endDateTime"] = f"{end_date}T23:59:59Z"
+
+    # Send GET request
+    try:
+        response = requests.get(url, params=params)
+        response.raise_for_status()  # Raise error for bad status codes
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        print(f"Error Fetching Events From ticketmaster: {e}")
+        return None
+
+
+def fetch_eventbrite_events(api_key, interest=None, location=None, start_date=None, end_date=None, limit=10):
+    """
+    Fetch events from Eventbrite API.
+
+    Args:
+        api_key (str): Eventbrite API key.
+        interest (str): Event type (e.g., "Music").
+        location (str): City/region (e.g., "Mumbai").
+        start_date (str): "YYYY-MM-DD" format.
+        end_date (str): "YYYY-MM-DD" format.
+        limit (int): Max results (default: 10).
+
+    Returns:
+        dict: JSON response or None if error.
+    """
+    url = "https://www.eventbriteapi.com/v3/events/search/"
+    headers = {"Authorization": f"Bearer {api_key}"}
+    params = {"expand": "venue"}
+
+    # Add category filter if valid
+    if interest and interest in EVENTBRITE_CATEGORIES:
+        params["categories"] = EVENTBRITE_CATEGORIES[interest]
+
+    # Location filter
+    if location:
+        params["location.address"] = location
+
+    # Date filters
+    if start_date:
+        params["start_date.range_start"] = f"{start_date}T00:00:00"
+    if end_date:
+        params["start_date.range_end"] = f"{end_date}T23:59:59"
+
+    # Pagination
+    params["page_size"] = limit
+
+    try:
+        response = requests.get(url, headers=headers, params=params)
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        print(f"Error Fetching Events From Eventbrite: {e}")
+        return None
+
+
+def fetch_predicthq_events(api_key, interest=None, location=None, start_date=None, end_date=None, limit=10):
+    """
+    Fetch events from PredictHQ API.
+
+    Args:
+        api_key (str): PredictHQ API key.
+        interest (str): Event type (e.g., "Music").
+        location (str): "city,country" (e.g., "Mumbai,IN").
+        start_date (str): "YYYY-MM-DD" format.
+        end_date (str): "YYYY-MM-DD" format.
+        limit (int): Max results (default: 10).
+
+    Returns:
+        dict: JSON response or None if error.
+    """
+    url = "https://api.predicthq.com/v1/events/"
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Accept": "application/json"
+    }
+    params = {}
+
+    # Category filter
+    if interest and interest in PREDICTHQ_CATEGORIES:
+        params["category"] = PREDICTHQ_CATEGORIES[interest]
+
+    # Location filter (requires "lat,lon" or "city,country")
+    if location:
+        params["q"] = location
+
+    # Date filters
+    if start_date:
+        params["start"] = f"{start_date}T00:00:00Z"
+    if end_date:
+        params["end"] = f"{end_date}T23:59:59Z"
+
+    # Pagination
+    params["limit"] = limit
+
+    try:
+        response = requests.get(url, headers=headers, params=params)
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        print(f"Error Fetching Events From PredictHQ: {e}")
+        return None
+
+
+
+def scrape_google_events(query, location, date_range):
+    """Scrape Google Events as a fallback."""
+    url = f"https://www.google.com/search?q={query}+events+in+{location}+on+{date_range}"
+    headers = {"User-Agent": "Mozilla/5.0"}
+    try:
+        response = requests.get(url, headers=headers)
+        soup = BeautifulSoup(response.text, "html.parser")
+        events = []
+        # Parse events (adjust selectors as needed)
+        for event in soup.select(".event-card"):
+            events.append({
+                "name": event.select_one(".title").text,
+                "date": event.select_one(".date").text,
+                "location": location
+            })
+        return {"events": events}
+    except Exception as e:
+        print(f"Scraping error: {e}")
+        return None
+
+
+def format_event(event: Dict, source: str) -> Dict:
+    """Convert API-specific event to UI-ready format"""
+    formatted = {
+        "source": source,
+        "id": "",
+        "title": "",
+        "date": "",
+        "time": "",
+        "location": "",
+        "venue": "",
+        "image_url": "",
+        "event_url": "",
+        "description": ""
+    }
+
+    if source == "ticketmaster":
+        formatted.update({
+            "id": event.get("id", ""),
+            "title": event.get("name", "No title"),
+            "date": event.get("dates", {}).get("start", {}).get("localDate", "Date not specified"),
+            "time": event.get("dates", {}).get("start", {}).get("localTime", ""),
+            "location": f"{event.get('_embedded', {}).get('venues', [{}])[0].get('city', {}).get('name', '')}, "
+                        f"{event.get('_embedded', {}).get('venues', [{}])[0].get('country', {}).get('name', '')}",
+            "venue": event.get('_embedded', {}).get('venues', [{}])[0].get('name', 'Venue not specified'),
+            "image_url": next((img['url'] for img in event.get('images', []) if img.get('ratio') == '16_9'), ""),
+            "event_url": event.get('url', '#'),
+            "description": event.get('info', 'No description available')
+        })
+
+    elif source == "eventbrite":
+        formatted.update({
+            "id": event.get("id", ""),
+            "title": event.get("name", {}).get("text", "No title"),
+            "date": event.get("start", {}).get("local", "").split("T")[0],
+            "time": event.get("start", {}).get("local", "").split("T")[1][:5] if event.get("start", {}).get("local") else "",
+            "location": f"{event.get('venue', {}).get('address', {}).get('city', '')}, "
+                        f"{event.get('venue', {}).get('address', {}).get('region', '')}",
+            "venue": event.get('venue', {}).get('name', 'Venue not specified'),
+            "image_url": event.get('logo', {}).get('original', {}).get('url', ''),
+            "event_url": event.get('url', '#'),
+            "description": event.get('description', {}).get('text', 'No description available')[:200] + "..."
+        })
+
+    elif source == "predicthq":
+        formatted.update({
+            "id": event.get("id", ""),
+            "title": event.get("title", "No title"),
+            "date": event.get("start", "").split("T")[0],
+            "time": event.get("start", "").split("T")[1][:5] if event.get("start") else "",
+            "location": event.get("location", [""])[0],
+            "venue": event.get("entities", [{}])[0].get("name", "Venue not specified"),
+            "image_url": "",
+            "event_url": event.get("phq_article_url", "#"),
+            "description": event.get("description", "No description available")[:200] + "..."
+        })
+
+    elif source == "scraping":
+        formatted.update({
+            "title": event.get("name", "No title"),
+            "date": event.get("date", "Date not specified"),
+            "location": event.get("location", ""),
+            "event_url": "#"
+        })
+
+    return formatted
+
+
+
+def fetch_and_store_events(interest=None, city=None, country_code=None, location=None,
+                         start_date=None, end_date=None):
+    """
+    Fetches events and stores them for paginated display
+    Returns True if events were found, False otherwise
+    """
+    global event_storage
+
+    common_params = {
+        "interest": interest,
+        "start_date": start_date,
+        "end_date": end_date,
+        "size": RESULTS_PER_PAGE
+    }
+
+    for api_name in API_PRIORITY:
+        api_key = API_KEYS.get(api_name)
+        if not api_key:
+            continue
+
+        try:
+            if api_name == "ticketmaster":
+                events = fetch_ticketmaster_events(
+                    api_key=api_key,
+                    city=city,
+                    country_code=country_code,
+                    **common_params
+                )
+                if events and events.get("_embedded", {}).get("events"):
+                    formatted_events = [
+                        format_event(e, "ticketmaster")
+                        for e in events["_embedded"]["events"]
+                    ]
+                    event_storage.add_events(formatted_events)
+                    return True
+
+            elif api_name == "eventbrite":
+                events = fetch_eventbrite_events(
+                    api_key=api_key,
+                    location=location or city,
+                    **common_params
+                )
+                if events and events.get("events"):
+                    formatted_events = [
+                        format_event(e, "eventbrite")
+                        for e in events["events"]
+                    ]
+                    event_storage.add_events(formatted_events)
+                    return True
+
+            elif api_name == "predicthq":
+                loc = f"{city},{country_code}" if city and country_code else location
+                events = fetch_predicthq_events(
+                    api_key=api_key,
+                    location=loc,
+                    **common_params
+                )
+                if events and events.get("results"):
+                    formatted_events = [
+                        format_event(e, "predicthq")
+                        for e in events["results"]
+                    ]
+                    event_storage.add_events(formatted_events)
+                    return True
+
+        except Exception as e:
+            print(f"Error with {api_name}: {e}")
+            continue
+
+    # Fallback to scraping if all APIs fail
+    date_range = f"{start_date} to {end_date}" if start_date and end_date else "upcoming"
+    query = interest or "events"
+    scraped = scrape_google_events(query, location or city or country_code, date_range)
+    if scraped and scraped.get("events"):
+        formatted_events = [
+            format_event(e, "scraping")
+            for e in scraped["events"]
+        ]
+        event_storage.add_events(formatted_events)
+        return True
+
+    return False
+
+
+
+def get_next_event_for_display() -> Optional[Dict]:
+    """Get the next event for UI display"""
+    return event_storage.get_next_event()
+
+
+def has_more_events() -> bool:
+    """Check if more events are available"""
+    return event_storage.has_more_events()
 
 def safe_api_call(func):
     """Decorator for safely calling API functions"""
@@ -156,111 +492,80 @@ def init_clients(openroute_api_key, google_maps_api_key):
     return ors_client, gmaps_client
 
 # Generate synthetic user context
-def get_synthetic_users_by_free_slot():
+def get_synthetic_user():
     # This is a placeholder function that returns synthetic user data
     # In a real app, you would get this data from the user's actual context
     """
     Return synthetic user data with automatically calculated free hours
     based on calendar and current time.
     """
-
-    tz = pytz.timezone("America/New_York")
-    now = datetime.now()
-    # Get weekend dates
-    saturday, sunday = get_upcoming_weekend(now)
-
-    calendar = [
-        # Saturday events
-        {
-            "summary": "Brunch with friends",
-            "start": datetime.combine(saturday, time(11, 0)).astimezone(pytz.timezone("America/New_York")),
-            "end": datetime.combine(saturday, time(13, 0)).astimezone(pytz.timezone("America/New_York")),
-            "all_day": False
-        },
-        {
-            "summary": "Gym session",
-            "start": datetime.combine(saturday, time(16, 0)).astimezone(pytz.timezone("America/New_York")),
-            "end": datetime.combine(saturday, time(17, 30)).astimezone(pytz.timezone("America/New_York")),
-            "all_day": False
-        },
-        # Sunday events
-        {
-            "summary": "Family dinner",
-            "start": datetime.combine(sunday, time(18, 0)).astimezone(pytz.timezone("America/New_York")),
-            "end": datetime.combine(sunday, time(20, 0)).astimezone(pytz.timezone("America/New_York")),
-            "all_day": False
-        }
-    ]
-
-    # Calculate free time for the weekend
-    weekend_slots = get_weekend_free_slots(calendar, now)
-
-    synthetic_users = []
-
-    for day_key in ["saturday", "sunday"]:
-            for slot in weekend_slots[day_key]["free_slots"]:
-                free_hours = round(slot["duration"], 2)  # Or keep as float
-
-                user_data = {
-                    "location": {
-                        "city": "New York",
-                        "lat": 40.7128,
-                        "lon": 74.0060
-                    },
-                    "weather": "Rainy",
-                    "current_time": slot["start"],
-                    "free_hours": free_hours,
-                    "timezone": "America/New_York",
-                    "interests": {
-                        "travel": 0.91,
-                        "food": 0.18,
-                        "news": 0.15,
-                        "shopping": 0.13,
-                        "gaming": 0.24
-                    },
-                    "calendar": calendar,
-                    "weekend_free_slots": weekend_slots
-                }
-
-                synthetic_users.append(user_data)
-
     # Define the user's base information
-"""     user_data = {
+    user_data = {
+        "user_id": "us001",
         "location": {
-            "city": "New York",
-            "lat": 40.7128,
-            "lon": 74.0060
+            "city": "Bangalore",
+            "lat": 12.9716,
+            "lon": 77.5946
         },
-        "weather": "Rainy",
-        #"current_time": "Saturday 8 AM",
-        "current_time" : now,
+        "weather": "Sunny",
+        "current_time": "Tuesday 4 PM",
         #"free_hours": 4,
-#         calendar": [
-#             {"event": "Lunch with friend", "start": "1 PM", "end": "2 PM"},
-#             {"event": "Office Meeting", "start": "6 PM", "end": "7 PM"}
-#         ],
+        "calendar": [
+            {"event": "Lunch with friend", "start": "1 PM", "end": "2 PM"},
+            {"event": "Office Meeting", "start": "6 PM", "end": "7 PM"}
+        ],
         "interests": {
             "travel": 0.91,
             "food": 0.18,
             "news": 0.15,
             "shopping": 0.13,
             "gaming": 0.24
-        },
-        "timezone": "America/New_York",
-    } """
-
+        }
+    }
+    
     # Calculate free hours based on current time and calendar
-#     user_data["free_hours"] = calculate_free_time(
-#         user_data["current_time"],
-#         user_data["calendar"]
-#     )
+    user_data["free_hours"] = calculate_free_time(
+        user_data["current_time"], 
+        user_data["calendar"]
+    )
+    
+    return user_data
 
-    # Calculate free time for the weekend
-    #user_data["weekend_free_slots"] = get_weekend_free_slots(user_data["calendar"], now)
-
-    #return user_data
-
-    return synthetic_users
+def get_synthetic_weekend_slots():
+   """
+   Returns predefined weekend time slots for demo purposes.
+   """
+   weekend_slots = [
+       {
+           "id": "S1",
+           "day": "Saturday",
+           "start_time": "3 PM",
+           "end_time": "6 PM",
+           "duration_hours": 3
+       },
+       {
+           "id": "S2",
+           "day": "Saturday",
+           "start_time": "7 AM",
+           "end_time": "11 AM",
+           "duration_hours": 4
+       },
+       {
+           "id": "S3",
+           "day": "Sunday",
+           "start_time": "1 PM",
+           "end_time": "6 PM",
+           "duration_hours": 5
+       },
+       {
+           "id": "S4",
+           "day": "Sunday",
+           "start_time": "7 AM",
+           "end_time": "9 AM",
+           "duration_hours": 2
+       }
+   ]
+   return weekend_slots
 
 def extract_main_keywords(text):
     """
@@ -321,7 +626,7 @@ def extract_keywords_from_prompt(prompt):
     """
     try:
         # If we have OpenAI access, use it for best results
-        if OPENAI_API_KEY.api_key and OPENAI_API_KEY != "Test":
+        if openai.api_key and openai.api_key != "Test":
             try:
                 response = openai.ChatCompletion.create(
                     model="gpt-3.5-turbo",
@@ -736,8 +1041,6 @@ def get_adjusted_interests(user):
 
 def top_activity_interest_llm(user):
     model = st.session_state.model
-    if not model:
-        raise RuntimeError("Model not initialized in session state")
     
     # Get adjusted interests based on feedback
     adjusted_interests = get_adjusted_interests(user)
@@ -1005,16 +1308,13 @@ def get_user_preferences_db():
     if "user_preferences" not in st.session_state:
         st.session_state.user_preferences = {
             "category_preferences": {
-                "food": 0.4,
-                "travel": 0.5,
+                "food": 0.5,
+                "travel": 0.9,
                 "shopping": 0.5,
                 "gaming": 0.5,
                 "news": 0.5,
                 "fitness": 0.7,
-                "sports": 0.8,
-                "cooking": 0.5,
-                "events": 0.9,
-                "theatre": 0.7
+                "cooking": 0.5
             },
             "liked_places": [],
             "disliked_places": []
@@ -1312,404 +1612,152 @@ def parse_time_to_minutes(time_str):
     except Exception:
         return 0  # Default in case of error
 
-def fetch_ticketmaster_events(api_key, interest=None, city=None, country_code=None, start_date=None, end_date=None, size=10):
-    """
-    Fetches events from Ticketmaster API based on interest (event type).
+def show_booking_options(recommendation):
+    """Display booking dropdown and button for accommodation options"""
+    if recommendation.get("type") not in ["outdoor", "travel"]:
+        return
 
+    # Get location from recommendation
+    place_name = recommendation.get("place", {}).get("name", "Unknown place")
+    place_address = recommendation.get("place", {}).get("formatted_address", place_name)
+
+    # Get upcoming weekend dates
+    today = datetime.now()
+    saturday, sunday = get_upcoming_weekend(today)
+
+    # Generate booking URLs
+    booking_urls = BookingUtils.generate_booking_urls(
+        location=place_address,
+        check_in=saturday,
+        check_out=sunday,
+        guests=2,  # Default, can make configurable
+        rooms=1    # Default, can make configurable
+    )
+
+    # Create dropdown and button in Streamlit
+    st.markdown("---")
+    st.subheader("🏨 Need accommodation?")
+
+    col1, col2 = st.columns([3, 2])
+
+    with col1:
+        selected_platform = st.selectbox(
+            "Choose a booking site:",
+            options=[""] + list(booking_urls.keys()),
+            format_func=lambda x: "Select a platform" if x == "" else x.capitalize(),
+            key=f"platform_select_{recommendation['name']}"
+        )
+
+    with col2:
+        if selected_platform:
+            platform_name = selected_platform.capitalize()
+            if st.button(f"Book on {platform_name}",
+                        key=f"book_{selected_platform}_{recommendation['name']}"):
+                BookingUtils.open_booking_platform(selected_platform, booking_urls[selected_platform])
+                # Track this booking click
+                update_preferences_from_feedback(
+                    "booking_click",
+                    {"platform": selected_platform, "place": place_name}
+                )
+        else:
+            st.button("Select platform first", disabled=True)
+
+def generate_booking_urls(location, check_in, check_out, guests=2, rooms=1):
+    """
+    Generate deep links for major booking platforms
     Args:
-        api_key (str): Ticketmaster API key.
-        interest (str, optional): Event type (e.g., "Music", "Sports"). Defaults to None.
-        city (str, optional): Filter by city (e.g., "Mumbai"). Defaults to None.
-        country_code (str, optional): 2-letter country code (e.g., "IN"). Defaults to None.
-        start_date (str, optional): Start date in "YYYY-MM-DD" format. Defaults to None.
-        end_date (str, optional): End date in "YYYY-MM-DD" format. Defaults to None.
-        size (int, optional): Number of results (max 200). Defaults to 10.
-
+        location (str): Destination city or address
+        check_in (datetime): Check-in date
+        check_out (datetime): Check-out date
+        guests (int): Number of guests
+        rooms (int): Number of rooms
     Returns:
-        dict: JSON response from Ticketmaster API.
+        dict: {platform_name: url}
     """
+    date_format = "%Y-%m-%d"
 
-    params = {"apikey": api_key, "size": kwargs.get("size", 10)}
-    if interest in EVENT_TYPE_TO_SEGMENT:
-        params["segmentId"] = EVENT_TYPE_TO_SEGMENT[interest]
-
-    # Base API URL
-    url = "https://app.ticketmaster.com/discovery/v2/events.json"
-
-    # Initialize query parameters
     params = {
-        "apikey": api_key,
-        "size": size
+        'location': location,
+        'check_in': check_in.strftime(date_format),
+        'check_out': check_out.strftime(date_format),
+        'guests': guests,
+        'rooms': rooms
     }
 
-    # Add segmentId if interest is valid
-    if interest and interest in EVENT_TYPE_TO_SEGMENT:
-        params["segmentId"] = EVENT_TYPE_TO_SEGMENT[interest]
-
-    # Add location filters
-    if city:
-        params["city"] = city
-    if country_code:
-        params["countryCode"] = country_code
-
-    # Add date filters (ISO 8601 format)
-    if start_date:
-        params["startDateTime"] = f"{start_date}T00:00:00Z"
-    if end_date:
-        params["endDateTime"] = f"{end_date}T23:59:59Z"
-
-    # Send GET request
-    try:
-        response = requests.get(url, params=params)
-        response.raise_for_status()  # Raise error for bad status codes
-        return response.json()
-    except requests.exceptions.RequestException as e:
-        print(f"Error Fetching Events From ticketmaster: {e}")
-        return None
-
-def fetch_eventbrite_events(api_key, interest=None, location=None, start_date=None, end_date=None, limit=10):
-    """
-    Fetch events from Eventbrite API.
-
-    Args:
-        api_key (str): Eventbrite API key.
-        interest (str): Event type (e.g., "Music").
-        location (str): City/region (e.g., "Mumbai").
-        start_date (str): "YYYY-MM-DD" format.
-        end_date (str): "YYYY-MM-DD" format.
-        limit (int): Max results (default: 10).
-
-    Returns:
-        dict: JSON response or None if error.
-    """
-    url = "https://www.eventbriteapi.com/v3/events/search/"
-    headers = {"Authorization": f"Bearer {api_key}"}
-    params = {"expand": "venue"}
-
-    # Add category filter if valid
-    if interest and interest in EVENTBRITE_CATEGORIES:
-        params["categories"] = EVENTBRITE_CATEGORIES[interest]
-
-    # Location filter
-    if location:
-        params["location.address"] = location
-
-    # Date filters
-    if start_date:
-        params["start_date.range_start"] = f"{start_date}T00:00:00"
-    if end_date:
-        params["start_date.range_end"] = f"{end_date}T23:59:59"
-
-    # Pagination
-    params["page_size"] = limit
-
-    try:
-        response = requests.get(url, headers=headers, params=params)
-        response.raise_for_status()
-        return response.json()
-    except requests.exceptions.RequestException as e:
-        print(f"Error Fetching Events From Eventbrite: {e}")
-        return None
-
-def fetch_predicthq_events(api_key, interest=None, location=None, start_date=None, end_date=None, limit=10):
-    """
-    Fetch events from PredictHQ API.
-
-    Args:
-        api_key (str): PredictHQ API key.
-        interest (str): Event type (e.g., "Music").
-        location (str): "city,country" (e.g., "Mumbai,IN").
-        start_date (str): "YYYY-MM-DD" format.
-        end_date (str): "YYYY-MM-DD" format.
-        limit (int): Max results (default: 10).
-
-    Returns:
-        dict: JSON response or None if error.
-    """
-    url = "https://api.predicthq.com/v1/events/"
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Accept": "application/json"
-    }
-    params = {}
-
-    # Category filter
-    if interest and interest in PREDICTHQ_CATEGORIES:
-        params["category"] = PREDICTHQ_CATEGORIES[interest]
-
-    # Location filter (requires "lat,lon" or "city,country")
-    if location:
-        params["q"] = location
-
-    # Date filters
-    if start_date:
-        params["start"] = f"{start_date}T00:00:00Z"
-    if end_date:
-        params["end"] = f"{end_date}T23:59:59Z"
-
-    # Pagination
-    params["limit"] = limit
-
-    try:
-        response = requests.get(url, headers=headers, params=params)
-        response.raise_for_status()
-        return response.json()
-    except requests.exceptions.RequestException as e:
-        print(f"Error Fetching Events From PredictHQ: {e}")
-        return None
-
-def scrape_google_events(query, location, date_range):
-    """Scrape Google Events as a fallback."""
-    url = f"https://www.google.com/search?q={query}+events+in+{location}+on+{date_range}"
-    headers = {"User-Agent": "Mozilla/5.0"}
-    try:
-        response = requests.get(url, headers=headers)
-        soup = BeautifulSoup(response.text, "html.parser")
-        events = []
-        # Parse events (adjust selectors as needed)
-        for event in soup.select(".event-card"):
-            events.append({
-                "name": event.select_one(".title").text,
-                "date": event.select_one(".date").text,
-                "location": location
-            })
-        return {"events": events}
-    except Exception as e:
-        print(f"Scraping error: {e}")
-        return None
-
-# ====================== Unified Event Format ======================
-def format_event(event: Dict, source: str) -> Dict:
-    """Convert API-specific event to UI-ready format"""
-    formatted = {
-        "source": source,
-        "id": "",
-        "title": "",
-        "date": "",
-        "time": "",
-        "location": "",
-        "venue": "",
-        "image_url": "",
-        "event_url": "",
-        "description": ""
+    return {
+        'airbnb': BookingUtils._generate_airbnb_url(**params),
+        'booking': BookingUtils._generate_booking_com_url(**params),
+        'agoda': BookingUtils._generate_agoda_url(**params),
+        'expedia': BookingUtils._generate_expedia_url(**params),
+        'hotels': BookingUtils._generate_hotels_com_url(**params)
     }
 
-    if source == "ticketmaster":
-        formatted.update({
-            "id": event.get("id", ""),
-            "title": event.get("name", "No title"),
-            "date": event.get("dates", {}).get("start", {}).get("localDate", "Date not specified"),
-            "time": event.get("dates", {}).get("start", {}).get("localTime", ""),
-            "location": f"{event.get('_embedded', {}).get('venues', [{}])[0].get('city', {}).get('name', '')}, "
-                        f"{event.get('_embedded', {}).get('venues', [{}])[0].get('country', {}).get('name', '')}",
-            "venue": event.get('_embedded', {}).get('venues', [{}])[0].get('name', 'Venue not specified'),
-            "image_url": next((img['url'] for img in event.get('images', []) if img.get('ratio') == '16_9'), ""),
-            "event_url": event.get('url', '#'),
-            "description": event.get('info', 'No description available')
-        })
-
-    elif source == "eventbrite":
-        formatted.update({
-            "id": event.get("id", ""),
-            "title": event.get("name", {}).get("text", "No title"),
-            "date": event.get("start", {}).get("local", "").split("T")[0],
-            "time": event.get("start", {}).get("local", "").split("T")[1][:5] if event.get("start", {}).get("local") else "",
-            "location": f"{event.get('venue', {}).get('address', {}).get('city', '')}, "
-                        f"{event.get('venue', {}).get('address', {}).get('region', '')}",
-            "venue": event.get('venue', {}).get('name', 'Venue not specified'),
-            "image_url": event.get('logo', {}).get('original', {}).get('url', ''),
-            "event_url": event.get('url', '#'),
-            "description": event.get('description', {}).get('text', 'No description available')[:200] + "..."
-        })
-
-    elif source == "predicthq":
-        formatted.update({
-            "id": event.get("id", ""),
-            "title": event.get("title", "No title"),
-            "date": event.get("start", "").split("T")[0],
-            "time": event.get("start", "").split("T")[1][:5] if event.get("start") else "",
-            "location": event.get("location", [""])[0],
-            "venue": event.get("entities", [{}])[0].get("name", "Venue not specified"),
-            "image_url": "",
-            "event_url": event.get("phq_article_url", "#"),
-            "description": event.get("description", "No description available")[:200] + "..."
-        })
-
-    elif source == "scraping":
-        formatted.update({
-            "title": event.get("name", "No title"),
-            "date": event.get("date", "Date not specified"),
-            "location": event.get("location", ""),
-            "event_url": "#"
-        })
-
-    return formatted
-
-# ====================== Unified Fetcher ======================
-def fetch_and_store_events(interest=None, city=None, country_code=None, location=None,
-                         start_date=None, end_date=None):
-    """
-    Fetches events and stores them for paginated display
-    Returns True if events were found, False otherwise
-    """
-    global event_storage
-
-    common_params = {
-        "interest": interest,
-        "start_date": start_date,
-        "end_date": end_date,
-        "size": RESULTS_PER_PAGE
+def _generate_airbnb_url(location, check_in, check_out, guests, rooms):
+    base_url = "https://www.airbnb.com/s/"
+    query = {
+        'query': location,
+        'checkin': check_in,
+        'checkout': check_out,
+        'adults': guests,
+        'price_max': None  # Can add price filters
     }
+    return f"{base_url}{quote(location)}/homes?" + urlencode(query)
 
-    for api_name in API_PRIORITY:
-        api_key = API_KEYS.get(api_name)
-        if not api_key:
-            continue
-
-        try:
-            if api_name == "ticketmaster":
-                events = fetch_ticketmaster_events(
-                    api_key=api_key,
-                    city=city,
-                    country_code=country_code,
-                    **common_params
-                )
-                if events and events.get("_embedded", {}).get("events"):
-                    formatted_events = [
-                        format_event(e, "ticketmaster")
-                        for e in events["_embedded"]["events"]
-                    ]
-                    event_storage.add_events(formatted_events)
-                    return True
-
-            elif api_name == "eventbrite":
-                events = fetch_eventbrite_events(
-                    api_key=api_key,
-                    location=location or city,
-                    **common_params
-                )
-                if events and events.get("events"):
-                    formatted_events = [
-                        format_event(e, "eventbrite")
-                        for e in events["events"]
-                    ]
-                    event_storage.add_events(formatted_events)
-                    return True
-
-            elif api_name == "predicthq":
-                loc = f"{city},{country_code}" if city and country_code else location
-                events = fetch_predicthq_events(
-                    api_key=api_key,
-                    location=loc,
-                    **common_params
-                )
-                if events and events.get("results"):
-                    formatted_events = [
-                        format_event(e, "predicthq")
-                        for e in events["results"]
-                    ]
-                    event_storage.add_events(formatted_events)
-                    return True
-
-        except Exception as e:
-            print(f"Error with {api_name}: {e}")
-            continue
-
-    # Fallback to scraping if all APIs fail
-    date_range = f"{start_date} to {end_date}" if start_date and end_date else "upcoming"
-    query = interest or "events"
-    scraped = scrape_google_events(query, location or city or country_code, date_range)
-    if scraped and scraped.get("events"):
-        formatted_events = [
-            format_event(e, "scraping")
-            for e in scraped["events"]
-        ]
-        event_storage.add_events(formatted_events)
-        return True
-
-    return False
-
-# ====================== UI Interface ======================
-def get_next_event_for_display() -> Optional[Dict]:
-    """Get the next event for UI display"""
-    return event_storage.get_next_event()
-
-def has_more_events() -> bool:
-    """Check if more events are available"""
-    return event_storage.has_more_events()
-
-def get_upcoming_weekend(now=None):
-    if now is None:
-        now = datetime.now()
-
-    # Find how many days to add to get to Saturday (weekday 5)
-    days_until_saturday = (5 - now.weekday()) % 7
-    saturday = now + timedelta(days=days_until_saturday)
-    sunday = saturday + timedelta(days=1)
-
-    # Return just the dates (without time)
-    return saturday.date(), sunday.date()
-
-def get_weekend_free_slots(calendar_events, current_time):
-    """Calculate free time slots for the upcoming weekend."""
-    tz = pytz.timezone("America/New_York")
-    now_local = current_time.astimezone(tz)
-    saturday, sunday = get_upcoming_weekend(now_local)
-
-    # Initialize day structure
-    weekend_days = {
-        "saturday": {
-            "date": saturday,
-            "busy_slots": [],
-            "free_slots": []
-        },
-        "sunday": {
-            "date": sunday,
-            "busy_slots": [],
-            "free_slots": []
-        }
+def _generate_booking_com_url(location, check_in, check_out, guests, rooms):
+    base_url = "https://www.booking.com/searchresults.html"
+    query = {
+        'ss': location,
+        'checkin': check_in,
+        'checkout': check_out,
+        'group_adults': guests,
+        'no_rooms': rooms,
+        'group_children': 0,
+        'sb_travel_purpose': 'leisure'
     }
+    return f"{base_url}?{urlencode(query)}"
 
-    # Process calendar events
-    for event in calendar_events:
-        event_date = event["start"].date()
-        if event_date in [saturday, sunday]:
-            day_key = "saturday" if event_date == saturday else "sunday"
-            weekend_days[day_key]["busy_slots"].append({
-                "start": event["start"],
-                "end": event["end"],
-                "summary": event.get("summary", "")
-            })
+def _generate_agoda_url(location, check_in, check_out, guests, rooms):
+    base_url = "https://www.agoda.com/search"
+    query = {
+        'city': location,
+        'checkIn': check_in,
+        'checkOut': check_out,
+        'adults': guests,
+        'rooms': rooms,
+        'children': 0,
+        'priceCur': 'USD'
+    }
+    return f"{base_url}?{urlencode(query)}"
 
-    # Calculate free slots for each day
-    for day in ["saturday", "sunday"]:
-        date = weekend_days[day]["date"]
-        busy_slots = sorted(weekend_days[day]["busy_slots"], key=lambda x: x["start"])
+@staticmethod
+def _generate_expedia_url(location, check_in, check_out, guests, rooms):
+    base_url = "https://www.expedia.com/Hotel-Search"
+    query = {
+        'destination': location,
+        'startDate': check_in,
+        'endDate': check_out,
+        'adults': guests,
+        'rooms': rooms
+    }
+    return f"{base_url}?{urlencode(query)}"
 
-        # Day boundaries (9 AM to 10 PM)
-        day_start = datetime.combine(date, time(9, 0)).astimezone(tz)
-        day_end = datetime.combine(date, time(22, 0)).astimezone(tz)
+def _generate_hotels_com_url(location, check_in, check_out, guests, rooms):
+    base_url = "https://www.hotels.com/search.do"
+    query = {
+        'q-destination': location,
+        'q-check-in': check_in,
+        'q-check-out': check_out,
+        'q-rooms': rooms,
+        'q-adults': guests,
+        'q-children': 0
+    }
+    return f"{base_url}?{urlencode(query)}"
 
-        # Find gaps between events
-        prev_end = day_start
-        for slot in busy_slots:
-            if slot["start"] > prev_end:
-                weekend_days[day]["free_slots"].append({
-                    "start": prev_end,
-                    "end": slot["start"],
-                    "duration": (slot["start"] - prev_end).total_seconds() / 3600
-                })
-            prev_end = max(prev_end, slot["end"])
-
-        # Add remaining time after last event
-        if prev_end < day_end:
-            weekend_days[day]["free_slots"].append({
-                "start": prev_end,
-                "end": day_end,
-                "duration": (day_end - prev_end).total_seconds() / 3600
-            })
-
-    return weekend_days
+def open_booking_platform(platform, url):
+    """Open booking platform in default browser with tracking"""
+    print(f"Redirecting to {platform}...")
+    webbrowser.open(url)
+    return {"status": "success", "platform": platform, "url": url}
 
 # Enhanced version of choose_place with better error handling
 @safe_api_call
@@ -1834,3 +1882,96 @@ Mention only one place by name.
         logger.error(f"Error in choose_place: {str(e)}")
         logger.error(traceback.format_exc())
         return None, "We encountered an unexpected error. Let's suggest an indoor activity instead."
+
+
+class AstraManager:
+    """
+    Simplified AstraManager for hackathon demo.
+    Records user interactions to a single collection in Astra DB.
+    """
+
+
+    def __init__(self, token: Optional[str] = None, api_endpoint: Optional[str] = None):
+        """Initialize Astra DB client and create collection if needed"""
+        # Get credentials from environment or parameters
+        self.token = token or os.environ.get('ASTRA_TOKEN')
+        self.api_endpoint = api_endpoint or os.environ.get('ASTRA_API_ENDPOINT')
+        
+        if not self.token or not self.api_endpoint:
+            raise ValueError("Astra DB token and API endpoint are required")
+        
+        # Initialize client
+        self.client = DataAPIClient(self.token)
+        self.db = self.client.get_database_by_api_endpoint(self.api_endpoint)
+        
+        # Define collection name
+        self.interactions_collection_name = "user_interactions"
+        
+        # Create collection if it doesn't exist
+        self._init_collection()
+        
+    def _init_collection(self):
+        """Initialize user_interactions collection if it doesn't exist"""
+        # Get existing collections
+        existing_collections = self.db.list_collection_names()
+        
+        # Create collection if it doesn't exist
+        if self.interactions_collection_name not in existing_collections:
+            try:
+                self.db.create_collection(self.interactions_collection_name)
+            except Exception as e:
+                print(f"Error creating collection: {str(e)}")
+    
+    
+    def record_interaction(self, interaction_data: Dict[str, Any]):
+            """
+            Record a user interaction in Astra DB
+            
+            Args:
+                interaction_data: Dictionary containing:
+                    - user_id: Identifier for the user
+                    - weather: Current weather conditions
+                    - time: Timestamp of the interaction (auto-generated if not provided)
+                    - location: User's location
+                    - free_time: Amount of free time available
+                    - suggested_activity: The activity recommended by the LLM
+                    - user_action: User's response (Like, Dislike, Know More, or blank)
+                    - session_id: Identifier for the current session
+                    - user_interests: Dictionary of interest categories and their scores
+                
+            Returns:
+                bool: Success status
+            """
+            try:
+                # Generate interaction_id if not provided
+                if "interaction_id" not in interaction_data:
+                    interaction_data["interaction_id"] = str(uuid.uuid4())
+                
+                # Add timestamp if not provided
+                if "time" not in interaction_data:
+                    interaction_data["time"] = datetime.now().isoformat()
+    
+                # Flatten recommendation_data if it exists
+                rec_data = interaction_data.pop("recommendation_data", {})
+                interaction_data.update(rec_data)
+                
+                # Set document ID for Astra DB
+                interaction_data["_id"] = interaction_data["interaction_id"]
+    
+                collection = self.db.get_collection(self.interactions_collection_name)
+    
+                collection.insert_one(document=interaction_data)
+                return True
+    
+            except Exception as e:
+                print(f"Error recording interaction: {str(e)}")
+                return False
+
+
+
+#astra initializing
+astra_manager = AstraManager(token=os.environ.get("ASTRA_TOKEN"),api_endpoint=os.environ.get("ASTRA_API_ENDPOINT"))
+                
+                
+
+
