@@ -1617,21 +1617,19 @@ def show_booking_options(recommendation):
     if recommendation.get("type") not in ["outdoor", "travel"]:
         return
 
-    # Get location from recommendation
     place_name = recommendation.get("place", {}).get("name", "Unknown place")
     place_address = recommendation.get("place", {}).get("formatted_address", place_name)
 
-    # Get upcoming weekend dates
     today = datetime.now()
     saturday, sunday = get_upcoming_weekend(today)
 
-    # Generate booking URLs
-    booking_urls = BookingUtils.generate_booking_urls(
+    # Call the standalone function directly
+    booking_urls = generate_booking_urls(
         location=place_address,
         check_in=saturday,
         check_out=sunday,
-        guests=2,  # Default, can make configurable
-        rooms=1    # Default, can make configurable
+        guests=2,
+        rooms=1
     )
 
     # Create dropdown and button in Streamlit
@@ -1729,7 +1727,6 @@ def _generate_agoda_url(location, check_in, check_out, guests, rooms):
     }
     return f"{base_url}?{urlencode(query)}"
 
-@staticmethod
 def _generate_expedia_url(location, check_in, check_out, guests, rooms):
     base_url = "https://www.expedia.com/Hotel-Search"
     query = {
