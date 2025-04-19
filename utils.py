@@ -1612,54 +1612,6 @@ def parse_time_to_minutes(time_str):
     except Exception:
         return 0  # Default in case of error
 
-def show_booking_options(recommendation):
-    """Display booking dropdown and button for accommodation options"""
-    if recommendation.get("type") not in ["outdoor", "travel"]:
-        return
-
-    place_name = recommendation.get("place", {}).get("name", "Unknown place")
-    place_address = recommendation.get("place", {}).get("formatted_address", place_name)
-
-    today = datetime.now()
-    saturday, sunday = get_upcoming_weekend(today)
-
-    # Call the standalone function directly
-    booking_urls = generate_booking_urls(
-        location=place_address,
-        check_in=saturday,
-        check_out=sunday,
-        guests=2,
-        rooms=1
-    )
-
-    # Create dropdown and button in Streamlit
-    st.markdown("---")
-    st.subheader("🏨 Need accommodation?")
-
-    col1, col2 = st.columns([3, 2])
-
-    with col1:
-        selected_platform = st.selectbox(
-            "Choose a booking site:",
-            options=[""] + list(booking_urls.keys()),
-            format_func=lambda x: "Select a platform" if x == "" else x.capitalize(),
-            key=f"platform_select_{recommendation['name']}"
-        )
-
-    with col2:
-        if selected_platform:
-            platform_name = selected_platform.capitalize()
-            if st.button(f"Book on {platform_name}",
-                        key=f"book_{selected_platform}_{recommendation['name']}"):
-                BookingUtils.open_booking_platform(selected_platform, booking_urls[selected_platform])
-                # Track this booking click
-                update_preferences_from_feedback(
-                    "booking_click",
-                    {"platform": selected_platform, "place": place_name}
-                )
-        else:
-            st.button("Select platform first", disabled=True)
-
 def generate_booking_urls(location, check_in, check_out, guests=2, rooms=1):
     """
     Generate deep links for major booking platforms
@@ -1683,25 +1635,25 @@ def generate_booking_urls(location, check_in, check_out, guests=2, rooms=1):
     }
 
     return {
-        'airbnb': BookingUtils._generate_airbnb_url(**params),
-        'booking': BookingUtils._generate_booking_com_url(**params),
-        'agoda': BookingUtils._generate_agoda_url(**params),
-        'expedia': BookingUtils._generate_expedia_url(**params),
-        'hotels': BookingUtils._generate_hotels_com_url(**params)
+        'airbnb': generate_airbnb_url(**params),
+        'booking': generate_booking_com_url(**params),
+        'agoda': generate_agoda_url(**params),
+        'expedia': generate_expedia_url(**params),
+        'hotels': generate_hotels_com_url(**params)
     }
 
-def _generate_airbnb_url(location, check_in, check_out, guests, rooms):
+def generate_airbnb_url(location, check_in, check_out, guests, rooms):
     base_url = "https://www.airbnb.com/s/"
     query = {
         'query': location,
         'checkin': check_in,
         'checkout': check_out,
         'adults': guests,
-        'price_max': None  # Can add price filters
+        'price_max': None
     }
     return f"{base_url}{quote(location)}/homes?" + urlencode(query)
 
-def _generate_booking_com_url(location, check_in, check_out, guests, rooms):
+def generate_booking_com_url(location, check_in, check_out, guests, rooms):
     base_url = "https://www.booking.com/searchresults.html"
     query = {
         'ss': location,
@@ -1714,7 +1666,7 @@ def _generate_booking_com_url(location, check_in, check_out, guests, rooms):
     }
     return f"{base_url}?{urlencode(query)}"
 
-def _generate_agoda_url(location, check_in, check_out, guests, rooms):
+def generate_agoda_url(location, check_in, check_out, guests, rooms):
     base_url = "https://www.agoda.com/search"
     query = {
         'city': location,
@@ -1727,7 +1679,7 @@ def _generate_agoda_url(location, check_in, check_out, guests, rooms):
     }
     return f"{base_url}?{urlencode(query)}"
 
-def _generate_expedia_url(location, check_in, check_out, guests, rooms):
+def generate_expedia_url(location, check_in, check_out, guests, rooms):
     base_url = "https://www.expedia.com/Hotel-Search"
     query = {
         'destination': location,
@@ -1738,7 +1690,7 @@ def _generate_expedia_url(location, check_in, check_out, guests, rooms):
     }
     return f"{base_url}?{urlencode(query)}"
 
-def _generate_hotels_com_url(location, check_in, check_out, guests, rooms):
+def generate_hotels_com_url(location, check_in, check_out, guests, rooms):
     base_url = "https://www.hotels.com/search.do"
     query = {
         'q-destination': location,
@@ -1755,6 +1707,83 @@ def open_booking_platform(platform, url):
     print(f"Redirecting to {platform}...")
     webbrowser.open(url)
     return {"status": "success", "platform": platform, "url": url}
+
+def show_booking_options(recommendation):
+    """Display booking dropdown with comprehensive error handling"""
+    try:
+        # Validate recommendation structure
+        if not recommendation or not isinstance(recommendation, dict):
+            st.warning("No booking options available")
+            return
+
+        # Check if this is a bookable type
+        if recommendation.get("type") not in ["outdoor", "travel"]:
+            return
+
+        # Validate required location data
+        place_data = recommendation.get("place", {})
+        if not place_data or not isinstance(place_data, dict):
+            st.warning("No booking options available - missing location data")
+            return
+
+        place_name = place_data.get("name")
+        place_address = place_data.get("formatted_address", place_name)
+
+        if not place_address:
+            st.warning("No booking options available - address missing")
+            return
+
+        # Generate dates
+        try:
+            today = datetime.now()
+            saturday, sunday = get_upcoming_weekend(today)
+        except Exception:
+            st.warning("No booking options available - date error")
+            return
+
+        # Generate URLs
+        try:
+            booking_urls = generate_booking_urls(
+                location=place_address,
+                check_in=saturday,
+                check_out=sunday,
+                guests=2,
+                rooms=1
+            )
+
+            if not booking_urls:
+                st.warning("No booking options available")
+                return
+
+        except Exception:
+            st.warning("No booking options available - service error")
+            return
+
+        # Display UI
+        st.markdown("---")
+        st.subheader("🏨 Need accommodation?")
+
+        col1, col2 = st.columns([3, 2])
+
+        with col1:
+            selected_platform = st.selectbox(
+                "Choose a booking site:",
+                options=[""] + list(booking_urls.keys()),
+                format_func=lambda x: "Select a platform" if x == "" else x.capitalize(),
+                key=f"platform_select_{recommendation.get('name', '')}"
+            )
+
+        with col2:
+            if selected_platform:
+                platform_name = selected_platform.capitalize()
+                if st.button(f"Book on {platform_name}"):
+                    open_booking_platform(selected_platform, booking_urls[selected_platform])
+            else:
+                st.button("Select platform first", disabled=True)
+
+    except Exception as e:
+        st.error("Failed to load booking options")
+        print(f"Booking error: {str(e)}")  # Log full error for debugging
 
 # Enhanced version of choose_place with better error handling
 @safe_api_call
