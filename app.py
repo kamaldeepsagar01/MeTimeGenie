@@ -46,11 +46,11 @@ from utils import (
     #Booking functions
     show_booking_options,
     generate_booking_urls,
-    _generate_airbnb_url,
-    _generate_booking_com_url,
-    _generate_agoda_url,
-    _generate_expedia_url,
-    _generate_hotels_com_url,
+    generate_airbnb_url,
+    generate_booking_com_url,
+    generate_agoda_url,
+    generate_expedia_url,
+    generate_hotels_com_url,
     open_booking_platform,
     AppError, APIError, LLMError, ImageError
 )
